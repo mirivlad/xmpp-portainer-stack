@@ -113,6 +113,8 @@ LE_EMAIL=${LE_EMAIL}
 CERT_SOURCE_DIR=/var/lib/xmpp-portainer-stack/certs
 
 TURN_SECRET=${TURN_SECRET}
+TURN_SECRET_FILE=/var/lib/xmpp-portainer-stack/turn-secret
+TURN_CONFIG_FILE=/var/lib/xmpp-portainer-stack/turnserver.conf
 TURN_LISTEN_IP=${TURN_LISTEN_IP}
 TURN_RELAY_IP=${TURN_RELAY_IP}
 TURN_EXTERNAL_IP=${TURN_EXTERNAL_IP}
