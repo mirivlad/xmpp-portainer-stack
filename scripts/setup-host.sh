@@ -215,6 +215,8 @@ mkdir -p "${HOOK_DIR}"
 
 {
   echo '#!/usr/bin/env bash'
+  # The variables below must be expanded by the future certbot hook, not here.
+  # shellcheck disable=SC2016
   printf 'if [[ -n "${RENEWED_LINEAGE:-}" && "${RENEWED_LINEAGE}" != %q ]]; then exit 0; fi\n' "${CERT_DIR}"
   printf 'exec bash %q %q\n' "${ROOT_DIR}/scripts/sync-certs.sh" "${ENV_FILE}"
 } > "${HOOK_FILE}"
