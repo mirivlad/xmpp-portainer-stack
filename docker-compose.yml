@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:17-alpine
+    pull_policy: always
     container_name: xmpp-db
     restart: unless-stopped
     environment:
@@ -39,7 +40,6 @@ services:
       XMPP_ADMIN_USER: ${XMPP_ADMIN_USER:-admin}
       XMPP_ADMIN_PASSWORD: ${XMPP_ADMIN_PASSWORD}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      TURN_SECRET: ${TURN_SECRET}
       LOCAL: ${XMPP_ADMIN_USER:-admin}
       DOMAIN: ${XMPP_DOMAIN}
       PASSWORD: ${XMPP_ADMIN_PASSWORD}
@@ -47,6 +47,7 @@ services:
       - xmpp_data:/var/lib/prosody
       - xmpp_certs:/etc/prosody/certs
       - ${CERT_SOURCE_DIR:-/var/lib/xmpp-portainer-stack/certs}:/cert-source:ro
+      - ${TURN_SECRET_FILE:-/var/lib/xmpp-portainer-stack/turn-secret}:/run/xmpp-stack-secrets/turn-secret:ro
       # Optional custom mod_register_web templates:
       # - /absolute/host/path/register-templates:/register-templates:ro
       # Then add: register_web_template = "/register-templates"
@@ -67,6 +68,13 @@ services:
     command:
       - |
         set -euo pipefail
+
+        test -r /run/xmpp-stack-secrets/turn-secret || {
+          echo 'Missing TURN secret file. Run scripts/setup-host.sh first.' >&2
+          exit 1
+        }
+        TURN_SECRET="$$(cat /run/xmpp-stack-secrets/turn-secret)"
+        export TURN_SECRET
 
         mkdir -p /var/lib/prosody/custom_plugins
 
@@ -202,30 +210,19 @@ services:
 
   turn:
     image: coturn/coturn:4.17.2
+    pull_policy: always
     container_name: xmpp-turn
     restart: unless-stopped
     network_mode: host
+    volumes:
+      - ${TURN_CONFIG_FILE:-/var/lib/xmpp-portainer-stack/turnserver.conf}:/etc/coturn/turnserver.conf:ro
     logging:
       options:
         max-size: "10m"
         max-file: "3"
     command:
-      - -n
-      - --log-file=stdout
-      - --listening-ip=${TURN_LISTEN_IP}
-      - --relay-ip=${TURN_RELAY_IP}
-      - --external-ip=${TURN_EXTERNAL_IP}/${TURN_RELAY_IP}
-      - --fingerprint
-      - --use-auth-secret
-      - --static-auth-secret=${TURN_SECRET}
-      - --realm=turn.${XMPP_DOMAIN}
-      - --listening-port=3478
-      - --min-port=${TURN_MIN_PORT:-49160}
-      - --max-port=${TURN_MAX_PORT:-49200}
-      - --no-multicast-peers
-      - --no-cli
-      - --no-tls
-      - --no-dtls
+      - -c
+      - /etc/coturn/turnserver.conf
 
 networks:
   xmpp:
