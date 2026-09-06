@@ -107,7 +107,7 @@ fi
 echo "Restoring PostgreSQL database..."
 docker exec xmpp-db dropdb -U prosody --maintenance-db=postgres --if-exists prosody
 docker exec xmpp-db createdb -U prosody -T template0 prosody
-cat "${TMP_DIR}/database.dump" | docker exec -i xmpp-db pg_restore -U prosody -d prosody --no-owner --no-privileges
+docker exec -i xmpp-db pg_restore -U prosody -d prosody --no-owner --no-privileges < "${TMP_DIR}/database.dump"
 
 escaped_password="${POSTGRES_PASSWORD//\'/\'\'}"
 printf "ALTER ROLE prosody WITH PASSWORD '%s';\n" "${escaped_password}" | \
