@@ -16,9 +16,15 @@ services:
       retries: 10
     networks:
       - xmpp
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   prosody:
-    image: prosodyim/prosody:13.0
+    # Prosody documents :latest as the latest stable release.
+    image: prosodyim/prosody:latest
+    pull_policy: always
     container_name: xmpp-prosody
     restart: unless-stopped
     depends_on:
@@ -53,31 +59,53 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
     entrypoint: ["/bin/bash", "-lc"]
     command:
       - |
         set -euo pipefail
 
-        install_module() {
+        mkdir -p /var/lib/prosody/custom_plugins
+
+        install_pinned_module() {
           local module="$1"
-          local marker="$2"
-          if ! find /var/lib/prosody/custom_plugins -type f -name "$marker" -print -quit 2>/dev/null | grep -q .; then
-            echo "Installing $module..."
-            prosodyctl install --server=https://modules.prosody.im/rocks/ "$module"
+          local version="$2"
+          local url="$3"
+          local marker="/var/lib/prosody/custom_plugins/.xmpp-stack-$${module}-$${version}"
+
+          if [ ! -f "$${marker}" ]; then
+            echo "Installing pinned $${module} $${version}..."
+            prosodyctl install "$${url}"
+            find /var/lib/prosody/custom_plugins -maxdepth 1 -type f \
+              -name ".xmpp-stack-$${module}-*" ! -name ".xmpp-stack-$${module}-$${version}" -delete
+            touch "$${marker}"
           fi
         }
 
-        install_module mod_admin_web2 mod_admin_web2.lua
-        install_module mod_register_web mod_register_web.lua
+        install_pinned_module \
+          mod_admin_web2 \
+          2-1 \
+          https://modules.prosody.im/rocks/mod_admin_web2-2-1.src.rock
+
+        install_pinned_module \
+          mod_register_web \
+          47-1 \
+          https://modules.prosody.im/rocks/mod_register_web-47-1.src.rock
 
         admin_deps="$$(find /var/lib/prosody/custom_plugins -type f -path '*/admin_web2/get_deps.sh' -print -quit 2>/dev/null || true)"
-        if [ -n "$${admin_deps}" ] && [ ! -f "$$(dirname "$${admin_deps}")/.deps-installed" ]; then
-          echo 'Installing mod_admin_web2 web dependencies...'
-          (
-            cd "$$(dirname "$${admin_deps}")"
-            sh ./get_deps.sh
-            touch .deps-installed
-          )
+        if [ -n "$${admin_deps}" ]; then
+          admin_deps_marker="$$(dirname "$${admin_deps}")/.deps-installed-2-1"
+          if [ ! -f "$${admin_deps_marker}" ]; then
+            echo 'Installing mod_admin_web2 web dependencies...'
+            (
+              cd "$$(dirname "$${admin_deps}")"
+              sh ./get_deps.sh
+              touch "$${admin_deps_marker}"
+            )
+          fi
         fi
 
         cat > /etc/prosody/prosody.cfg.lua <<EOF
@@ -177,6 +205,10 @@ services:
     container_name: xmpp-turn
     restart: unless-stopped
     network_mode: host
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
     command:
       - -n
       - --log-file=stdout
