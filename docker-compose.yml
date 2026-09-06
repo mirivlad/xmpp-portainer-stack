@@ -1,0 +1,205 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: xmpp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: prosody
+      POSTGRES_USER: prosody
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - xmpp_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prosody -d prosody"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - xmpp
+
+  prosody:
+    image: prosodyim/prosody:13.0
+    container_name: xmpp-prosody
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5222:5222"
+      - "5269:5269"
+      - "127.0.0.1:5280:5280"
+    environment:
+      XMPP_DOMAIN: ${XMPP_DOMAIN}
+      XMPP_ADMIN_USER: ${XMPP_ADMIN_USER:-admin}
+      XMPP_ADMIN_PASSWORD: ${XMPP_ADMIN_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TURN_SECRET: ${TURN_SECRET}
+      LOCAL: ${XMPP_ADMIN_USER:-admin}
+      DOMAIN: ${XMPP_DOMAIN}
+      PASSWORD: ${XMPP_ADMIN_PASSWORD}
+    volumes:
+      - xmpp_data:/var/lib/prosody
+      - xmpp_certs:/etc/prosody/certs
+      - ${CERT_SOURCE_DIR:-/var/lib/xmpp-portainer-stack/certs}:/cert-source:ro
+      # Optional custom mod_register_web templates:
+      # - /absolute/host/path/register-templates:/register-templates:ro
+      # Then add: register_web_template = "/register-templates"
+      # to the generated Prosody configuration below.
+    networks:
+      - xmpp
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5222'"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - |
+        set -euo pipefail
+
+        install_module() {
+          local module="$1"
+          local marker="$2"
+          if ! find /var/lib/prosody/custom_plugins -type f -name "$marker" -print -quit 2>/dev/null | grep -q .; then
+            echo "Installing $module..."
+            prosodyctl install --server=https://modules.prosody.im/rocks/ "$module"
+          fi
+        }
+
+        install_module mod_admin_web2 mod_admin_web2.lua
+        install_module mod_register_web mod_register_web.lua
+
+        admin_deps="$$(find /var/lib/prosody/custom_plugins -type f -path '*/admin_web2/get_deps.sh' -print -quit 2>/dev/null || true)"
+        if [ -n "$${admin_deps}" ] && [ ! -f "$$(dirname "$${admin_deps}")/.deps-installed" ]; then
+          echo 'Installing mod_admin_web2 web dependencies...'
+          (
+            cd "$$(dirname "$${admin_deps}")"
+            sh ./get_deps.sh
+            touch .deps-installed
+          )
+        fi
+
+        cat > /etc/prosody/prosody.cfg.lua <<EOF
+        admins = { "$${XMPP_ADMIN_USER}@$${XMPP_DOMAIN}" }
+
+        modules_enabled = {
+          "disco"; "roster"; "saslauth"; "tls";
+          "blocklist"; "bookmarks"; "carbons"; "dialback";
+          "limits"; "pep"; "private"; "smacks";
+          "vcard4"; "vcard_legacy"; "csi_simple"; "ping";
+          "time"; "uptime"; "version"; "mam";
+          "admin_adhoc"; "admin_shell";
+          "bosh"; "websocket"; "admin_web2";
+          "cloud_notify"; "turn_external"; "register_web";
+        }
+
+        authentication = "internal_hashed"
+        allow_registration = false
+
+        register_web_title = "Регистрация на $${XMPP_DOMAIN}"
+        http_paths = { register_web = "/register" }
+        min_seconds_between_registrations = 60
+        registration_throttle_max = 2
+        registration_throttle_period = 3600
+        registration_throttle_cache_size = 1000
+
+        c2s_require_encryption = true
+        s2s_secure_auth = true
+        consider_websocket_secure = true
+        consider_bosh_secure = true
+
+        storage = "sql"
+        sql = {
+          driver = "PostgreSQL";
+          database = "prosody";
+          username = "prosody";
+          password = "$${POSTGRES_PASSWORD}";
+          host = "db";
+          port = 5432;
+        }
+
+        archive_expires_after = "365d"
+        log = { info = "*console" }
+        certificates = "/etc/prosody/certs"
+
+        http_interfaces = { "0.0.0.0", "::" }
+        http_ports = { 5280 }
+        https_ports = {}
+        http_external_url = "https://$${XMPP_DOMAIN}/"
+        trusted_proxies = { "172.16.0.0/12", "127.0.0.1", "::1" }
+
+        turn_external_host = "turn.$${XMPP_DOMAIN}"
+        turn_external_port = 3478
+        turn_external_secret = "$${TURN_SECRET}"
+        turn_external_tcp = true
+
+        VirtualHost "$${XMPP_DOMAIN}"
+
+        Component "conference.$${XMPP_DOMAIN}" "muc"
+          name = "$${XMPP_DOMAIN} rooms"
+          restrict_room_creation = "local"
+          modules_enabled = { "muc_mam" }
+
+        Component "share.$${XMPP_DOMAIN}" "http_file_share"
+          parent_host = "$${XMPP_DOMAIN}"
+          http_file_share_size_limit = 100 * 1024 * 1024
+          http_file_share_global_quota = 10 * 1024 * 1024 * 1024
+          http_file_share_expires_after = "30 days"
+          http_external_url = "https://share.$${XMPP_DOMAIN}/"
+          http_paths = { file_share = "/" }
+        EOF
+
+        test -r /cert-source/fullchain.pem || {
+          echo 'Missing /cert-source/fullchain.pem. Run scripts/setup-host.sh or stage certificates manually.' >&2
+          exit 1
+        }
+        test -r /cert-source/privkey.pem || {
+          echo 'Missing /cert-source/privkey.pem. Run scripts/setup-host.sh or stage certificates manually.' >&2
+          exit 1
+        }
+
+        mkdir -p /etc/prosody/certs
+        for host in "$${XMPP_DOMAIN}" "conference.$${XMPP_DOMAIN}" "share.$${XMPP_DOMAIN}"; do
+          cp -L /cert-source/fullchain.pem "/etc/prosody/certs/$${host}.crt"
+          cp -L /cert-source/privkey.pem "/etc/prosody/certs/$${host}.key"
+        done
+
+        chown -R prosody:prosody /var/lib/prosody /etc/prosody/certs
+        find /etc/prosody/certs -type f -name '*.crt' -exec chmod 0644 {} +
+        find /etc/prosody/certs -type f -name '*.key' -exec chmod 0600 {} +
+
+        prosodyctl check config
+        exec /entrypoint.sh prosody -F
+
+  turn:
+    image: coturn/coturn:4.17.2
+    container_name: xmpp-turn
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-ip=${TURN_LISTEN_IP}
+      - --relay-ip=${TURN_RELAY_IP}
+      - --external-ip=${TURN_EXTERNAL_IP}/${TURN_RELAY_IP}
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=turn.${XMPP_DOMAIN}
+      - --listening-port=3478
+      - --min-port=${TURN_MIN_PORT:-49160}
+      - --max-port=${TURN_MAX_PORT:-49200}
+      - --no-multicast-peers
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+
+networks:
+  xmpp:
+    driver: bridge
+
+volumes:
+  xmpp_db:
+  xmpp_data:
+  xmpp_certs:
