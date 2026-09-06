@@ -132,7 +132,9 @@ install_nginx_config() {
     exit 1
   fi
 
-  rm -f "${backup:-}"
+  if [[ -n "${backup}" ]]; then
+    rm -f "${backup}"
+  fi
   reload_nginx
 }
 
@@ -140,7 +142,7 @@ CERT_DIR="/etc/letsencrypt/live/${LE_CERT_NAME}"
 CERT_FILE="${CERT_DIR}/fullchain.pem"
 KEY_FILE="${CERT_DIR}/privkey.pem"
 
-cert_covers_required_names() {
+cert_has_required_names() {
   [[ -r "${CERT_FILE}" && -r "${KEY_FILE}" ]] || return 1
 
   local sans
@@ -152,7 +154,10 @@ cert_covers_required_names() {
     "share.${XMPP_DOMAIN}"; do
     grep -Fq "DNS:${name}" <<<"${sans}" || return 1
   done
+}
 
+cert_is_fresh() {
+  [[ -r "${CERT_FILE}" && -r "${KEY_FILE}" ]] || return 1
   openssl x509 -in "${CERT_FILE}" -noout -checkend 86400 >/dev/null 2>&1
 }
 
@@ -160,8 +165,8 @@ TMP_HTTP="$(mktemp)"
 TMP_FINAL="$(mktemp)"
 trap 'rm -f "${TMP_HTTP:-}" "${TMP_FINAL:-}"' EXIT
 
-if cert_covers_required_names; then
-  echo "Existing certificate ${LE_CERT_NAME} covers all required names."
+if cert_has_required_names && cert_is_fresh; then
+  echo "Existing certificate ${LE_CERT_NAME} covers all required names and is valid."
 else
   echo "Installing temporary HTTP nginx configuration for ACME..."
   render_template "${ROOT_DIR}/nginx/xmpp-http.conf.template" "${TMP_HTTP}"
@@ -181,13 +186,17 @@ else
   )
 
   if [[ -r "${CERT_FILE}" ]]; then
-    certbot_args+=(--expand)
+    if cert_has_required_names; then
+      certbot_args+=(--force-renewal)
+    else
+      certbot_args+=(--expand)
+    fi
   fi
 
   echo "Requesting/updating Let's Encrypt certificate ${LE_CERT_NAME}..."
   certbot "${certbot_args[@]}"
 
-  if ! cert_covers_required_names; then
+  if ! cert_has_required_names || ! cert_is_fresh; then
     echo "The resulting certificate is missing a required SAN or is not currently valid." >&2
     exit 1
   fi
@@ -198,7 +207,7 @@ render_template "${ROOT_DIR}/nginx/xmpp.conf.template" "${TMP_FINAL}"
 install_nginx_config "${TMP_FINAL}"
 
 export CERT_SOURCE_DIR TURN_MIN_PORT TURN_MAX_PORT
-"${ROOT_DIR}/scripts/sync-certs.sh" "${ENV_FILE}"
+bash "${ROOT_DIR}/scripts/sync-certs.sh" "${ENV_FILE}"
 
 HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
 HOOK_FILE="${HOOK_DIR}/xmpp-portainer-stack.sh"
@@ -206,7 +215,8 @@ mkdir -p "${HOOK_DIR}"
 
 {
   echo '#!/usr/bin/env bash'
-  printf 'exec %q %q\n' "${ROOT_DIR}/scripts/sync-certs.sh" "${ENV_FILE}"
+  printf 'if [[ -n "${RENEWED_LINEAGE:-}" && "${RENEWED_LINEAGE}" != %q ]]; then exit 0; fi\n' "${CERT_DIR}"
+  printf 'exec bash %q %q\n' "${ROOT_DIR}/scripts/sync-certs.sh" "${ENV_FILE}"
 } > "${HOOK_FILE}"
 chmod 0755 "${HOOK_FILE}"
 
