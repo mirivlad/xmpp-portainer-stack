@@ -37,6 +37,8 @@ set +a
 XMPP_ADMIN_USER="${XMPP_ADMIN_USER:-admin}"
 ADMIN_HTTP_USER="${ADMIN_HTTP_USER:-admin}"
 ADMIN_HTPASSWD_FILE="${ADMIN_HTPASSWD_FILE:-/etc/nginx/.htpasswd-xmpp-admin}"
+TURN_SECRET_FILE="${TURN_SECRET_FILE:-/var/lib/xmpp-portainer-stack/turn-secret}"
+TURN_CONFIG_FILE="${TURN_CONFIG_FILE:-/var/lib/xmpp-portainer-stack/turnserver.conf}"
 TURN_MIN_PORT="${TURN_MIN_PORT:-49160}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-49200}"
 
@@ -112,6 +114,29 @@ else
   fail "nginx Basic Auth file missing/unreadable or user absent: ${ADMIN_HTPASSWD_FILE}"
 fi
 
+if [[ -r "${TURN_SECRET_FILE}" ]] && [[ "$(tr -d '\r\n' < "${TURN_SECRET_FILE}")" == "${TURN_SECRET:-}" ]]; then
+  ok "staged TURN secret matches .env"
+else
+  fail "staged TURN secret missing or does not match: ${TURN_SECRET_FILE}"
+fi
+
+if [[ -r "${TURN_CONFIG_FILE}" ]] && grep -Fq "realm=turn.${XMPP_DOMAIN:-}" "${TURN_CONFIG_FILE}"; then
+  ok "coturn configuration staged"
+else
+  fail "coturn configuration missing or wrong realm: ${TURN_CONFIG_FILE}"
+fi
+
+if command -v stat >/dev/null 2>&1; then
+  for secret_path in "${TURN_SECRET_FILE}" "${TURN_CONFIG_FILE}"; do
+    mode="$(stat -c '%a' "${secret_path}" 2>/dev/null || true)"
+    if [[ "${mode}" == "600" ]]; then
+      ok "permissions ${secret_path}: 0600"
+    elif [[ -n "${mode}" ]]; then
+      warn "permissions ${secret_path}: ${mode}, expected 0600"
+    fi
+  done
+fi
+
 if docker info >/dev/null 2>&1; then
   ok "Docker daemon access"
 else
@@ -136,6 +161,15 @@ check_container() {
 check_container xmpp-db
 check_container xmpp-prosody
 check_container xmpp-turn
+
+if [[ -n "${TURN_SECRET:-}" ]]; then
+  docker_metadata="$(docker inspect xmpp-prosody xmpp-turn 2>/dev/null || true)"
+  if grep -Fq -- "${TURN_SECRET}" <<<"${docker_metadata}"; then
+    fail "TURN secret is exposed in persistent Docker container metadata"
+  else
+    ok "TURN secret is absent from Docker container metadata"
+  fi
+fi
 
 if docker exec xmpp-db pg_isready -U prosody -d prosody >/dev/null 2>&1; then
   ok "PostgreSQL accepts connections"
