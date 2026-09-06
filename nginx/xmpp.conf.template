@@ -1,0 +1,85 @@
+# Managed by xmpp-portainer-stack
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name __XMPP_DOMAIN__ conference.__XMPP_DOMAIN__ share.__XMPP_DOMAIN__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root __ACME_WEBROOT__;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name __XMPP_DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__LE_CERT_NAME__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__LE_CERT_NAME__/privkey.pem;
+
+    location /xmpp-websocket {
+        proxy_pass http://127.0.0.1:5280/xmpp-websocket;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:5280;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name share.__XMPP_DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__LE_CERT_NAME__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__LE_CERT_NAME__/privkey.pem;
+
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://127.0.0.1:5280;
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+
+# conference.__XMPP_DOMAIN__ needs the certificate for XMPP s2s on port 5269,
+# but it does not expose a web application. This HTTPS vhost is intentionally
+# minimal so a browser request does not fall through to another TLS vhost.
+server {
+    listen 443 ssl http2;
+    server_name conference.__XMPP_DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__LE_CERT_NAME__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__LE_CERT_NAME__/privkey.pem;
+
+    return 404;
+}
