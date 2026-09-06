@@ -1,0 +1,17 @@
+# Managed by xmpp-portainer-stack
+# Bootstrap HTTP-only configuration used before the first certificate exists.
+
+server {
+    listen 80;
+    server_name __XMPP_DOMAIN__ conference.__XMPP_DOMAIN__ share.__XMPP_DOMAIN__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root __ACME_WEBROOT__;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
