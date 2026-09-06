@@ -23,6 +23,8 @@ set +a
 XMPP_ADMIN_USER="${XMPP_ADMIN_USER:-admin}"
 ADMIN_HTTP_USER="${ADMIN_HTTP_USER:-admin}"
 ADMIN_HTPASSWD_FILE="${ADMIN_HTPASSWD_FILE:-/etc/nginx/.htpasswd-xmpp-admin}"
+TURN_SECRET_FILE="${TURN_SECRET_FILE:-/var/lib/xmpp-portainer-stack/turn-secret}"
+TURN_CONFIG_FILE="${TURN_CONFIG_FILE:-/var/lib/xmpp-portainer-stack/turnserver.conf}"
 
 required_vars=(
   XMPP_DOMAIN
@@ -61,10 +63,12 @@ if [[ ! "${LE_CERT_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 1
 fi
 
-if [[ ! "${ADMIN_HTPASSWD_FILE}" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
-  echo "ADMIN_HTPASSWD_FILE must be a simple absolute path: ${ADMIN_HTPASSWD_FILE}" >&2
-  exit 1
-fi
+for path_var in ADMIN_HTPASSWD_FILE TURN_SECRET_FILE TURN_CONFIG_FILE; do
+  if [[ ! "${!path_var}" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+    echo "${path_var} must be a simple absolute path: ${!path_var}" >&2
+    exit 1
+  fi
+done
 
 TURN_MIN_PORT="${TURN_MIN_PORT:-49160}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-49200}"
@@ -186,6 +190,40 @@ install_admin_htpasswd() {
   rm -f "${tmp_htpasswd}"
 }
 
+install_turn_files() {
+  local tmp_secret
+  local tmp_config
+
+  install -d -m 0700 "$(dirname -- "${TURN_SECRET_FILE}")"
+  install -d -m 0700 "$(dirname -- "${TURN_CONFIG_FILE}")"
+
+  tmp_secret="$(mktemp)"
+  printf '%s\n' "${TURN_SECRET}" > "${tmp_secret}"
+  install -o root -g root -m 0600 -T "${tmp_secret}" "${TURN_SECRET_FILE}"
+  rm -f "${tmp_secret}"
+
+  tmp_config="$(mktemp)"
+  cat > "${tmp_config}" <<EOF
+log-file=stdout
+listening-ip=${TURN_LISTEN_IP}
+relay-ip=${TURN_RELAY_IP}
+external-ip=${TURN_EXTERNAL_IP}/${TURN_RELAY_IP}
+fingerprint
+use-auth-secret
+static-auth-secret=${TURN_SECRET}
+realm=turn.${XMPP_DOMAIN}
+listening-port=3478
+min-port=${TURN_MIN_PORT}
+max-port=${TURN_MAX_PORT}
+no-multicast-peers
+no-cli
+no-tls
+no-dtls
+EOF
+  install -o root -g root -m 0600 -T "${tmp_config}" "${TURN_CONFIG_FILE}"
+  rm -f "${tmp_config}"
+}
+
 CERT_DIR="/etc/letsencrypt/live/${LE_CERT_NAME}"
 CERT_FILE="${CERT_DIR}/fullchain.pem"
 KEY_FILE="${CERT_DIR}/privkey.pem"
@@ -253,6 +291,9 @@ fi
 echo "Generating HTTP Basic Auth credentials for /admin..."
 install_admin_htpasswd
 
+echo "Staging coturn configuration and TURN secret..."
+install_turn_files
+
 echo "Installing full nginx reverse proxy configuration..."
 render_template "${ROOT_DIR}/nginx/xmpp.conf.template" "${TMP_FINAL}"
 install_nginx_config "${TMP_FINAL}"
@@ -279,6 +320,8 @@ echo "nginx config:      ${NGINX_CONF}"
 echo "admin Basic Auth:  ${ADMIN_HTTP_USER} (${ADMIN_HTPASSWD_FILE})"
 echo "certificate:       ${CERT_DIR}"
 echo "Prosody cert copy: ${CERT_SOURCE_DIR}"
+echo "TURN secret file:  ${TURN_SECRET_FILE}"
+echo "coturn config:      ${TURN_CONFIG_FILE}"
 echo "certbot hook:      ${HOOK_FILE}"
 echo
 echo "Next: deploy docker-compose.yml in Portainer or run:"
