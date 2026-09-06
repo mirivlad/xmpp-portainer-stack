@@ -11,7 +11,7 @@ if [[ ${EUID} -ne 0 ]]; then
 fi
 
 if [[ ! -r "${ENV_FILE}" ]]; then
-  echo "Cannot read ${ENV_FILE}. Copy .env.example to .env and edit it first." >&2
+  echo "Cannot read ${ENV_FILE}. Run ./scripts/init-config.sh or copy .env.example to .env first." >&2
   exit 1
 fi
 
@@ -20,9 +20,14 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+XMPP_ADMIN_USER="${XMPP_ADMIN_USER:-admin}"
+ADMIN_HTTP_USER="${ADMIN_HTTP_USER:-admin}"
+ADMIN_HTPASSWD_FILE="${ADMIN_HTPASSWD_FILE:-/etc/nginx/.htpasswd-xmpp-admin}"
+
 required_vars=(
   XMPP_DOMAIN
   XMPP_ADMIN_PASSWORD
+  ADMIN_HTTP_PASSWORD
   POSTGRES_PASSWORD
   LE_CERT_NAME
   LE_EMAIL
@@ -44,8 +49,20 @@ if [[ ! "${XMPP_DOMAIN}" =~ ^[A-Za-z0-9.-]+$ ]]; then
   exit 1
 fi
 
+for user_var in XMPP_ADMIN_USER ADMIN_HTTP_USER; do
+  if [[ ! "${!user_var}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "${user_var} contains unsupported characters: ${!user_var}" >&2
+    exit 1
+  fi
+done
+
 if [[ ! "${LE_CERT_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "LE_CERT_NAME contains unsupported characters: ${LE_CERT_NAME}" >&2
+  exit 1
+fi
+
+if [[ ! "${ADMIN_HTPASSWD_FILE}" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+  echo "ADMIN_HTPASSWD_FILE must be a simple absolute path: ${ADMIN_HTPASSWD_FILE}" >&2
   exit 1
 fi
 
@@ -65,9 +82,12 @@ if (( TURN_MIN_PORT < 1024 || TURN_MAX_PORT > 65535 || TURN_MIN_PORT > TURN_MAX_
   exit 1
 fi
 
-for cmd in nginx certbot openssl install sed; do
+for cmd in nginx certbot openssl install sed htpasswd; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     echo "Required command not found: ${cmd}" >&2
+    if [[ "${cmd}" == "htpasswd" ]]; then
+      echo "On Debian/Ubuntu install it with: apt install apache2-utils" >&2
+    fi
     exit 1
   fi
 done
@@ -90,6 +110,7 @@ render_template() {
     -e "s|__XMPP_DOMAIN__|${XMPP_DOMAIN}|g" \
     -e "s|__LE_CERT_NAME__|${LE_CERT_NAME}|g" \
     -e "s|__ACME_WEBROOT__|${ACME_WEBROOT}|g" \
+    -e "s|__ADMIN_HTPASSWD_FILE__|${ADMIN_HTPASSWD_FILE}|g" \
     "${src}" > "${dst}"
 }
 
@@ -136,6 +157,33 @@ install_nginx_config() {
     rm -f "${backup}"
   fi
   reload_nginx
+}
+
+install_admin_htpasswd() {
+  local nginx_worker_user=""
+  local nginx_worker_group="root"
+  local file_mode="0644"
+  local tmp_htpasswd
+
+  if [[ -r /etc/nginx/nginx.conf ]]; then
+    nginx_worker_user="$(awk '$1 == "user" { gsub(/;/, "", $2); print $2; exit }' /etc/nginx/nginx.conf || true)"
+  fi
+
+  if [[ -n "${nginx_worker_user}" ]] && id "${nginx_worker_user}" >/dev/null 2>&1; then
+    nginx_worker_group="$(id -gn "${nginx_worker_user}")"
+    file_mode="0640"
+  fi
+
+  mkdir -p "$(dirname -- "${ADMIN_HTPASSWD_FILE}")"
+  tmp_htpasswd="$(mktemp)"
+  if ! printf '%s\n' "${ADMIN_HTTP_PASSWORD}" | htpasswd -c -B -i "${tmp_htpasswd}" "${ADMIN_HTTP_USER}" >/dev/null 2>&1; then
+    rm -f "${tmp_htpasswd}"
+    echo "Failed to generate nginx htpasswd file." >&2
+    exit 1
+  fi
+
+  install -o root -g "${nginx_worker_group}" -m "${file_mode}" -T "${tmp_htpasswd}" "${ADMIN_HTPASSWD_FILE}"
+  rm -f "${tmp_htpasswd}"
 }
 
 CERT_DIR="/etc/letsencrypt/live/${LE_CERT_NAME}"
@@ -202,6 +250,9 @@ else
   fi
 fi
 
+echo "Generating HTTP Basic Auth credentials for /admin..."
+install_admin_htpasswd
+
 echo "Installing full nginx reverse proxy configuration..."
 render_template "${ROOT_DIR}/nginx/xmpp.conf.template" "${TMP_FINAL}"
 install_nginx_config "${TMP_FINAL}"
@@ -225,14 +276,13 @@ chmod 0755 "${HOOK_FILE}"
 echo
 echo "Host preparation complete."
 echo "nginx config:      ${NGINX_CONF}"
+echo "admin Basic Auth:  ${ADMIN_HTTP_USER} (${ADMIN_HTPASSWD_FILE})"
 echo "certificate:       ${CERT_DIR}"
 echo "Prosody cert copy: ${CERT_SOURCE_DIR}"
 echo "certbot hook:      ${HOOK_FILE}"
 echo
 echo "Next: deploy docker-compose.yml in Portainer or run:"
-echo "  cd ${ROOT_DIR} && docker compose up -d"
+echo "  cd ${ROOT_DIR} && docker compose up -d --pull always"
 echo
-echo "After Prosody starts, verify:"
-echo "  docker exec xmpp-prosody prosodyctl check config"
-echo "  docker exec xmpp-prosody prosodyctl check certs"
-echo "  docker exec xmpp-prosody prosodyctl check turn"
+echo "After the stack starts, run:"
+echo "  sudo ./scripts/doctor.sh"
