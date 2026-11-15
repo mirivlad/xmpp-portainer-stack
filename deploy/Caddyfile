@@ -1,0 +1,36 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$XMPP_DOMAIN} {
+    encode zstd gzip
+
+    @admin path /admin /admin/*
+    handle @admin {
+        basic_auth {
+            {$ADMIN_HTTP_USER} {$ADMIN_BASIC_HASH}
+        }
+        reverse_proxy prosody:5280
+    }
+
+    @register_root path /register
+    redir @register_root /register/ 308
+
+    @prosody path /register/* /xmpp-websocket /http-bind /.well-known/*
+    handle @prosody {
+        reverse_proxy prosody:5280
+    }
+
+    handle {
+        root * /srv/www
+        file_server
+    }
+}
+
+share.{$XMPP_DOMAIN} {
+    reverse_proxy prosody:5280
+}
+
+conference.{$XMPP_DOMAIN} {
+    respond "" 404
+}

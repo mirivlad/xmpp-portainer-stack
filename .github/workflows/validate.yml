@@ -7,23 +7,33 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate shell syntax
-        run: bash -n scripts/*.sh
+      - name: Validate legacy shell scripts
+        run: |
+          bash -n scripts/*.sh
+          shellcheck scripts/*.sh
 
-      - name: ShellCheck
-        run: shellcheck scripts/*.sh
-
-      - name: Validate Docker Compose
+      - name: Validate standalone Docker Compose and boot scripts
         run: |
           cp .env.example .env
           docker compose config --quiet
+          python3 tests/validate_deploy.py
 
-      - name: Validate versioned web assets
+      - name: Validate Caddy configuration
+        run: |
+          docker run --rm \
+            -e XMPP_DOMAIN=example.org \
+            -e ACME_EMAIL=admin@example.org \
+            -e ADMIN_HTTP_USER=admin \
+            -e ADMIN_BASIC_HASH=testhash \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.10-alpine caddy validate \
+              --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Validate registration assets
         run: |
           for file in register success simplecaptcha hcaptcha recaptcha; do
             test -s "register-templates/${file}.html"

@@ -1,123 +1,168 @@
+# Portable XMPP stack: set XMPP_DOMAIN, ACME_EMAIL and XMPP_ADMIN_PASSWORD.
+# Does not require host Nginx, Certbot, or bind mounts to Git checkout paths.
 services:
+  bootstrap:
+    image: alpine:3.22
+    restart: "no"
+    environment:
+      XMPP_DOMAIN: ${XMPP_DOMAIN:?Set XMPP_DOMAIN to a public DNS hostname}
+      ASSETS_REF: ${ASSETS_REF:-main}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      TURN_RELAY_IP: ${TURN_RELAY_IP:-}
+    volumes:
+      - runtime_secrets:/runtime/secrets
+      - web_site:/srv/www
+      - web_register:/srv/register
+      - caddy_files:/srv/caddy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        case "$$XMPP_DOMAIN" in
+          ""|*[!a-zA-Z0-9.-]*|.*|*.) echo "Invalid XMPP_DOMAIN" >&2; exit 1;;
+        esac
+        case "$$ASSETS_REF" in
+          ""|*[!a-zA-Z0-9._-]*) echo "Invalid ASSETS_REF" >&2; exit 1;;
+        esac
+        mkdir -p /runtime/secrets /srv/www /srv/register /srv/caddy
+        secret() {
+          if [ ! -s "/runtime/secrets/$$1" ]; then
+            od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "/runtime/secrets/$$1"
+            chmod 0644 "/runtime/secrets/$$1"
+          fi
+        }
+        secret postgres-password
+        secret turn-secret
+        base="https://raw.githubusercontent.com/mirivlad/xmpp-portainer-stack/$$ASSETS_REF"
+        fetch() {
+          wget -q -T 20 -O "$$2.tmp" "$$base/$$1"
+          test -s "$$2.tmp"
+          chmod 0644 "$$2.tmp"
+          mv -f "$$2.tmp" "$$2"
+        }
+        for item in register success simplecaptcha hcaptcha recaptcha; do
+          fetch "register-templates/$$item.html" "/srv/register/$$item.html"
+        done
+        fetch web/index.html.template /srv/www/index.html.template
+        sed "s|__XMPP_DOMAIN__|$$XMPP_DOMAIN|g" /srv/www/index.html.template > /srv/www/index.html
+        fetch web/robots.txt /srv/www/robots.txt
+        fetch deploy/Caddyfile /srv/caddy/Caddyfile
+        {
+          printf '%s\n' 'log-file=stdout' 'listening-port=3478' 'fingerprint' \
+            'use-auth-secret' "realm=turn.$$XMPP_DOMAIN" \
+            'min-port=49160' 'max-port=49200' 'no-multicast-peers' 'no-loopback-peers' 'no-cli'
+          printf 'static-auth-secret=%s\n' "$$(cat /runtime/secrets/turn-secret)"
+          if [ -n "$$TURN_EXTERNAL_IP" ]; then
+            if [ -n "$$TURN_RELAY_IP" ]; then
+              printf 'external-ip=%s/%s\n' "$$TURN_EXTERNAL_IP" "$$TURN_RELAY_IP"
+            else
+              printf 'external-ip=%s\n' "$$TURN_EXTERNAL_IP"
+            fi
+          fi
+        } > /runtime/secrets/turnserver.conf
+        chmod 0644 /runtime/secrets/turnserver.conf
+        echo "Bootstrap completed. Caddy will obtain and renew TLS certificates."
+
   db:
     image: postgres:17-alpine
-    pull_policy: always
-    container_name: xmpp-db
     restart: unless-stopped
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
     environment:
       POSTGRES_DB: prosody
       POSTGRES_USER: prosody
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/xmpp-secrets/postgres-password
     volumes:
       - xmpp_db:/var/lib/postgresql/data
+      - runtime_secrets:/run/xmpp-secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U prosody -d prosody"]
       interval: 10s
       timeout: 5s
       retries: 10
-    networks:
-      - xmpp
-    logging:
-      options:
-        max-size: "10m"
-        max-file: "3"
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      XMPP_DOMAIN: ${XMPP_DOMAIN:?Set XMPP_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+      ADMIN_HTTP_USER: ${ADMIN_HTTP_USER:-admin}
+      XMPP_ADMIN_PASSWORD: ${XMPP_ADMIN_PASSWORD:?Set XMPP_ADMIN_PASSWORD}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        export ADMIN_BASIC_HASH="$$(caddy hash-password --plaintext "$$XMPP_ADMIN_PASSWORD")"
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_state:/config
+      - caddy_files:/etc/caddy:ro
+      - web_site:/srv/www:ro
 
   prosody:
-    # Prosody documents :latest as the latest stable release.
-    image: prosodyim/prosody:latest
-    pull_policy: always
-    container_name: xmpp-prosody
+    image: prosodyim/prosody:13.0
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+      caddy:
+        condition: service_started
+    environment:
+      XMPP_DOMAIN: ${XMPP_DOMAIN:?Set XMPP_DOMAIN}
+      XMPP_ADMIN_USER: ${XMPP_ADMIN_USER:-admin}
+      XMPP_ADMIN_PASSWORD: ${XMPP_ADMIN_PASSWORD:?Set XMPP_ADMIN_PASSWORD}
     ports:
       - "5222:5222"
       - "5269:5269"
-      - "127.0.0.1:5280:5280"
-    environment:
-      XMPP_DOMAIN: ${XMPP_DOMAIN}
-      XMPP_ADMIN_USER: ${XMPP_ADMIN_USER:-admin}
-      XMPP_ADMIN_PASSWORD: ${XMPP_ADMIN_PASSWORD}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      LOCAL: ${XMPP_ADMIN_USER:-admin}
-      DOMAIN: ${XMPP_DOMAIN}
-      PASSWORD: ${XMPP_ADMIN_PASSWORD}
     volumes:
       - xmpp_data:/var/lib/prosody
       - xmpp_certs:/etc/prosody/certs
-      - ${CERT_SOURCE_DIR:-/var/lib/xmpp-portainer-stack/certs}:/cert-source:ro
-      - ${TURN_SECRET_FILE:-/var/lib/xmpp-portainer-stack/turn-secret}:/run/xmpp-stack-secrets/turn-secret:ro
-      # Host assets are provisioned by scripts/setup-host.sh
-      - ${REGISTER_TEMPLATES_DIR:-/var/lib/xmpp-portainer-stack/register-templates}:/register-templates:ro
-    networks:
-      - xmpp
+      - caddy_data:/caddy-data:ro
+      - web_register:/register-templates:ro
+      - runtime_secrets:/run/xmpp-secrets:ro
     healthcheck:
-      # Detect failed registration, not only open TCP 5222
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5222' && wget -q --tries=1 --timeout=3 --header=\"Host: $$XMPP_DOMAIN\" -O /dev/null http://127.0.0.1:5280/register/"]
-      interval: 20s
-      timeout: 5s
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 30s
-    logging:
-      options:
-        max-size: "20m"
-        max-file: "5"
+      start_period: 180s
     entrypoint: ["/bin/bash", "-lc"]
     command:
       - |
         set -euo pipefail
+        export POSTGRES_PASSWORD="$$(cat /run/xmpp-secrets/postgres-password)"
+        export TURN_SECRET="$$(cat /run/xmpp-secrets/turn-secret)"
+        export DOMAIN="$$XMPP_DOMAIN" LOCAL="$$XMPP_ADMIN_USER" PASSWORD="$$XMPP_ADMIN_PASSWORD"
+        mkdir -p /var/lib/prosody/custom_plugins /etc/prosody/certs
 
-        test -r /run/xmpp-stack-secrets/turn-secret || {
-          echo 'Missing TURN secret file. Run scripts/setup-host.sh first.' >&2
-          exit 1
-        }
-        TURN_SECRET="$$(cat /run/xmpp-stack-secrets/turn-secret)"
-        export TURN_SECRET
-
-        mkdir -p /var/lib/prosody/custom_plugins
-
-        install_pinned_module() {
-          local module="$1"
-          local version="$2"
-          local url="$3"
-          local marker="/var/lib/prosody/custom_plugins/.xmpp-stack-$${module}-$${version}"
-
-          if [ ! -f "$${marker}" ]; then
-            echo "Installing pinned $${module} $${version}..."
-            prosodyctl install "$${url}"
-            find /var/lib/prosody/custom_plugins -maxdepth 1 -type f \
-              -name ".xmpp-stack-$${module}-*" ! -name ".xmpp-stack-$${module}-$${version}" -delete
-            touch "$${marker}"
+        install_module() {
+          local mod="$$1" ver="$$2" url="$$3"
+          local marker="/var/lib/prosody/custom_plugins/.xmpp-stack-$${mod}-$${ver}"
+          if [[ ! -f "$$marker" ]]; then
+            prosodyctl install "$$url"
+            touch "$$marker"
           fi
         }
-
-        install_pinned_module \
-          mod_admin_web2 \
-          2-1 \
-          https://modules.prosody.im/rocks/mod_admin_web2-2-1.src.rock
-
-        install_pinned_module \
-          mod_register_web \
-          47-1 \
-          https://modules.prosody.im/rocks/mod_register_web-47-1.src.rock
-
+        install_module mod_admin_web2 2-1 https://modules.prosody.im/rocks/mod_admin_web2-2-1.src.rock
+        install_module mod_register_web 47-1 https://modules.prosody.im/rocks/mod_register_web-47-1.src.rock
         admin_deps="$$(find /var/lib/prosody/custom_plugins -type f -path '*/admin_web2/get_deps.sh' -print -quit 2>/dev/null || true)"
-        if [ -n "$${admin_deps}" ]; then
-          admin_deps_marker="$$(dirname "$${admin_deps}")/.deps-installed-2-1"
-          if [ ! -f "$${admin_deps_marker}" ]; then
-            echo 'Installing mod_admin_web2 web dependencies...'
-            (
-              cd "$$(dirname "$${admin_deps}")"
-              sh ./get_deps.sh
-              touch "$${admin_deps_marker}"
-            )
-          fi
+        if [[ -n "$$admin_deps" && ! -f "$$(dirname "$$admin_deps")/.deps-installed-2-1" ]]; then
+          (cd "$$(dirname "$$admin_deps")" && sh ./get_deps.sh && touch .deps-installed-2-1)
         fi
 
         cat > /etc/prosody/prosody.cfg.lua <<EOF
         admins = { "$${XMPP_ADMIN_USER}@$${XMPP_DOMAIN}" }
-
         modules_enabled = {
           "disco"; "roster"; "saslauth"; "tls";
           "blocklist"; "bookmarks"; "carbons"; "dialback";
@@ -128,10 +173,8 @@ services:
           "bosh"; "websocket"; "admin_web2";
           "cloud_notify"; "turn_external"; "register_web";
         }
-
         authentication = "internal_hashed"
         allow_registration = false
-
         register_web_title = "Регистрация на $${XMPP_DOMAIN}"
         register_web_template = "/register-templates"
         http_paths = { register_web = "/register" }
@@ -139,12 +182,10 @@ services:
         registration_throttle_max = 2
         registration_throttle_period = 3600
         registration_throttle_cache_size = 1000
-
         c2s_require_encryption = true
         s2s_secure_auth = true
         consider_websocket_secure = true
         consider_bosh_secure = true
-
         storage = "sql"
         sql = {
           driver = "PostgreSQL";
@@ -154,29 +195,23 @@ services:
           host = "db";
           port = 5432;
         }
-
         archive_expires_after = "365d"
         log = { info = "*console" }
         certificates = "/etc/prosody/certs"
-
         http_interfaces = { "0.0.0.0", "::" }
         http_ports = { 5280 }
         https_ports = {}
         http_external_url = "https://$${XMPP_DOMAIN}/"
         trusted_proxies = { "172.16.0.0/12", "127.0.0.1", "::1" }
-
         turn_external_host = "turn.$${XMPP_DOMAIN}"
         turn_external_port = 3478
         turn_external_secret = "$${TURN_SECRET}"
         turn_external_tcp = true
-
         VirtualHost "$${XMPP_DOMAIN}"
-
         Component "conference.$${XMPP_DOMAIN}" "muc"
           name = "$${XMPP_DOMAIN} rooms"
           restrict_room_creation = "local"
           modules_enabled = { "muc_mam" }
-
         Component "share.$${XMPP_DOMAIN}" "http_file_share"
           parent_host = "$${XMPP_DOMAIN}"
           http_file_share_size_limit = 100 * 1024 * 1024
@@ -186,49 +221,58 @@ services:
           http_paths = { file_share = "/" }
         EOF
 
-        test -r /cert-source/fullchain.pem || {
-          echo 'Missing /cert-source/fullchain.pem. Run scripts/setup-host.sh or stage certificates manually.' >&2
-          exit 1
+        sync_certs() {
+          SYNC_CHANGED=0
+          local host candidate dest
+          for host in "$$XMPP_DOMAIN" "conference.$$XMPP_DOMAIN" "share.$$XMPP_DOMAIN"; do
+            candidate="$$(find /caddy-data/caddy/certificates -type f -path "*/$$host/$$host.crt" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)"
+            [[ -n "$$candidate" && -r "$$candidate" && -r "$${candidate%.crt}.key" ]] || return 1
+            openssl x509 -in "$$candidate" -noout -checkhost "$$host" -checkend 3600 >/dev/null 2>&1 || return 1
+            dest="/etc/prosody/certs/$$host"
+            if ! cmp -s "$$candidate" "$$dest.crt" || ! cmp -s "$${candidate%.crt}.key" "$$dest.key"; then
+              install -m 0644 "$$candidate" "$$dest.crt.new"
+              install -m 0600 "$${candidate%.crt}.key" "$$dest.key.new"
+              chown prosody:prosody "$$dest.crt.new" "$$dest.key.new"
+              mv -f "$$dest.crt.new" "$$dest.crt"
+              mv -f "$$dest.key.new" "$$dest.key"
+              SYNC_CHANGED=1
+            fi
+          done
         }
-        test -r /cert-source/privkey.pem || {
-          echo 'Missing /cert-source/privkey.pem. Run scripts/setup-host.sh or stage certificates manually.' >&2
-          exit 1
-        }
-
-        mkdir -p /etc/prosody/certs
-        for host in "$${XMPP_DOMAIN}" "conference.$${XMPP_DOMAIN}" "share.$${XMPP_DOMAIN}"; do
-          cp -L /cert-source/fullchain.pem "/etc/prosody/certs/$${host}.crt"
-          cp -L /cert-source/privkey.pem "/etc/prosody/certs/$${host}.key"
-        done
-
-        chown -R prosody:prosody /var/lib/prosody /etc/prosody/certs
-        find /etc/prosody/certs -type f -name '*.crt' -exec chmod 0644 {} +
-        find /etc/prosody/certs -type f -name '*.key' -exec chmod 0600 {} +
-
+        echo "Waiting for Caddy to obtain certificates for XMPP, conference and share..."
+        until sync_certs; do sleep 10; done
+        echo "All TLS certificates available."
+        chown -R prosody:prosody /var/lib/prosody
         prosodyctl check config
+
+        (
+          while sleep 1800; do
+            if sync_certs && [[ "$$SYNC_CHANGED" -eq 1 ]]; then
+              echo "TLS certificates renewed; reloading Prosody"
+              prosodyctl reload || true
+            fi
+          done
+        ) &
         exec /entrypoint.sh prosody -F
 
   turn:
     image: coturn/coturn:4.17.2
-    pull_policy: always
-    container_name: xmpp-turn
     restart: unless-stopped
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
     network_mode: host
     volumes:
-      - ${TURN_CONFIG_FILE:-/var/lib/xmpp-portainer-stack/turnserver.conf}:/etc/coturn/turnserver.conf:ro
-    logging:
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command:
-      - -c
-      - /etc/coturn/turnserver.conf
-
-networks:
-  xmpp:
-    driver: bridge
+      - runtime_secrets:/run/xmpp-secrets:ro
+    command: ["-c", "/run/xmpp-secrets/turnserver.conf"]
 
 volumes:
   xmpp_db:
   xmpp_data:
   xmpp_certs:
+  runtime_secrets:
+  caddy_data:
+  caddy_state:
+  caddy_files:
+  web_site:
+  web_register:
