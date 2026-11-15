@@ -48,14 +48,13 @@ services:
       - xmpp_certs:/etc/prosody/certs
       - ${CERT_SOURCE_DIR:-/var/lib/xmpp-portainer-stack/certs}:/cert-source:ro
       - ${TURN_SECRET_FILE:-/var/lib/xmpp-portainer-stack/turn-secret}:/run/xmpp-stack-secrets/turn-secret:ro
-      # Optional custom mod_register_web templates:
-      # - /absolute/host/path/register-templates:/register-templates:ro
-      # Then add: register_web_template = "/register-templates"
-      # to the generated Prosody configuration below.
+      # Host assets are provisioned by scripts/setup-host.sh
+      - ${REGISTER_TEMPLATES_DIR:-/var/lib/xmpp-portainer-stack/register-templates}:/register-templates:ro
     networks:
       - xmpp
     healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5222'"]
+      # Detect failed registration, not only open TCP 5222
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5222' && wget -q --tries=1 --timeout=3 --header=\"Host: $$XMPP_DOMAIN\" -O /dev/null http://127.0.0.1:5280/register/"]
       interval: 20s
       timeout: 5s
       retries: 5
@@ -134,6 +133,7 @@ services:
         allow_registration = false
 
         register_web_title = "Регистрация на $${XMPP_DOMAIN}"
+        register_web_template = "/register-templates"
         http_paths = { register_web = "/register" }
         min_seconds_between_registrations = 60
         registration_throttle_max = 2

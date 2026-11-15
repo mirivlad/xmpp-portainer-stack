@@ -234,12 +234,19 @@ if command -v curl >/dev/null 2>&1 && [[ -n "${XMPP_DOMAIN:-}" ]]; then
     fail "HTTPS /admin returned ${admin_status:-no response}, expected 401 without credentials"
   fi
 
-  register_status="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 8 "https://${XMPP_DOMAIN}/register" 2>/dev/null || true)"
-  if [[ "${register_status}" =~ ^(200|301|302|303|307|308)$ ]]; then
-    ok "HTTPS /register responds (${register_status})"
+  # Follow redirects, then verify the real rendered form (not a 301).
+  register_body="$(mktemp)"
+  register_status="$(curl -ksSL -o "${register_body}" -w '%{http_code}' --max-time 10 "https://${XMPP_DOMAIN}/register/" 2>/dev/null || true)"
+  if [[ "${register_status}" == "200" ]] &&
+     grep -Fq 'name="username"' "${register_body}" &&
+     grep -Fq 'name="password"' "${register_body}" &&
+     grep -Fq 'name="confirm_password"' "${register_body}" &&
+     grep -Fq 'captcha' "${register_body}"; then
+    ok "HTTPS /register/ provides a registration form (HTTP 200)"
   else
-    warn "HTTPS /register returned ${register_status:-no response}"
+    fail "HTTPS /register/ returned ${register_status:-no response} or lacks required fields"
   fi
+  rm -f "${register_body}"
 else
   warn "curl not found; skipped HTTPS endpoint checks"
 fi

@@ -162,7 +162,7 @@ sudo ./scripts/doctor.sh
 - состояние контейнеров и PostgreSQL;
 - `prosodyctl check config`, `certs`, `dns`, `turn`, `features`;
 - локальные XMPP/HTTP/TURN listeners;
-- HTTPS `/admin` и `/register`.
+- HTTPS `/admin` и итоговую HTML-форму `/register/` после редиректов (200, логин/пароль/CAPTCHA).
 
 В конце выводится `OK / WARN / FAIL`. Внешний NAT и TURN relay range все равно нужно хотя бы один раз проверить из другой сети.
 
@@ -170,7 +170,7 @@ sudo ./scripts/doctor.sh
 
 Для `XMPP_DOMAIN=xmpp.example.org`:
 
-- регистрация: `https://xmpp.example.org/register`;
+- регистрация: `https://xmpp.example.org/register/`;
 - web admin: `https://xmpp.example.org/admin`;
 - WebSocket: `wss://xmpp.example.org/xmpp-websocket`;
 - HTTP File Share: `https://share.xmpp.example.org/`.
@@ -191,6 +191,8 @@ sudo ./scripts/doctor.sh
 | `LE_CERT_NAME` | имя certbot lineage |
 | `LE_EMAIL` | email Let's Encrypt |
 | `CERT_SOURCE_DIR` | staging certificate/key для Prosody |
+| `REGISTER_TEMPLATES_DIR` | host-каталог с HTML-шаблонами регистрации |
+| `LANDING_DIR` | host-каталог статической главной страницы |
 | `TURN_SECRET` | общий Prosody/coturn shared secret |
 | `TURN_SECRET_FILE` | host staging-файл TURN secret |
 | `TURN_CONFIG_FILE` | host path с coturn config |
@@ -201,6 +203,16 @@ sudo ./scripts/doctor.sh
 | `TURN_MAX_PORT` | конец relay range |
 
 Для сервера за NAT coturn получает mapping `PUBLIC_IP/PRIVATE_RELAY_IP`.
+
+## Главная страница и регистрация
+
+Главная страница `web/index.html.template` и пять файлов в `register-templates/` теперь хранятся в Git. `scripts/setup-host.sh` устанавливает их на Docker-хост в `LANDING_DIR` и `REGISTER_TEMPLATES_DIR`; XMPP-домен подставляется в статическую страницу при установке. Nginx обслуживает главную страницу, а `/register/` передаёт Prosody. Модуль регистрации продолжает применять штатную проверку CAPTCHA.
+
+Для **Portainer Git stack** сначала подготовьте Docker-хост командой `scripts/setup-host.sh` из checkout репозитория. В переменных стека `REGISTER_TEMPLATES_DIR` должен совпадать с абсолютным путём на Docker-хосте. Не указывайте вместо него путь внутри контейнера Portainer. После изменения HTML повторите установку web assets и перезагрузите модуль регистрации (`prosodyctl shell`) либо пересоздайте контейнер Prosody.
+
+**Существующие инсталляции:** если Compose и nginx уже были изменены вручную, не подменяйте живой стек новым `docker-compose.yml` без сверки mount-путей, volume, сертификатов и переменных. Текущие HTML-шаблоны можно обновлять через их существующий bind mount без пересоздания контейнеров.
+
+`doctor.sh` проверяет конечную HTML-форму (не просто перенаправление). Дополнительно healthcheck Prosody проверяет HTTP-маршрут регистрации, чтобы падение модуля не оставалось незамеченным.
 
 ## Prosody и community modules
 

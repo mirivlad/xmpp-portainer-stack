@@ -25,6 +25,8 @@ ADMIN_HTTP_USER="${ADMIN_HTTP_USER:-admin}"
 ADMIN_HTPASSWD_FILE="${ADMIN_HTPASSWD_FILE:-/etc/nginx/.htpasswd-xmpp-admin}"
 TURN_SECRET_FILE="${TURN_SECRET_FILE:-/var/lib/xmpp-portainer-stack/turn-secret}"
 TURN_CONFIG_FILE="${TURN_CONFIG_FILE:-/var/lib/xmpp-portainer-stack/turnserver.conf}"
+REGISTER_TEMPLATES_DIR="${REGISTER_TEMPLATES_DIR:-/var/lib/xmpp-portainer-stack/register-templates}"
+LANDING_DIR="${LANDING_DIR:-/var/www/xmpp-portainer-stack}"
 
 required_vars=(
   XMPP_DOMAIN
@@ -63,7 +65,7 @@ if [[ ! "${LE_CERT_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 1
 fi
 
-for path_var in ADMIN_HTPASSWD_FILE TURN_SECRET_FILE TURN_CONFIG_FILE; do
+for path_var in ADMIN_HTPASSWD_FILE TURN_SECRET_FILE TURN_CONFIG_FILE REGISTER_TEMPLATES_DIR LANDING_DIR; do
   if [[ ! "${!path_var}" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
     echo "${path_var} must be a simple absolute path: ${!path_var}" >&2
     exit 1
@@ -114,6 +116,7 @@ render_template() {
     -e "s|__XMPP_DOMAIN__|${XMPP_DOMAIN}|g" \
     -e "s|__LE_CERT_NAME__|${LE_CERT_NAME}|g" \
     -e "s|__ACME_WEBROOT__|${ACME_WEBROOT}|g" \
+    -e "s|__LANDING_DIR__|${LANDING_DIR}|g" \
     -e "s|__ADMIN_HTPASSWD_FILE__|${ADMIN_HTPASSWD_FILE}|g" \
     "${src}" > "${dst}"
 }
@@ -224,6 +227,20 @@ EOF
   rm -f "${tmp_config}"
 }
 
+install_web_assets() {
+  install -d -m 0755 "${REGISTER_TEMPLATES_DIR}" "${LANDING_DIR}"
+  local template
+  for template in register success simplecaptcha hcaptcha recaptcha; do
+    install -m 0644 "${ROOT_DIR}/register-templates/${template}.html" "${REGISTER_TEMPLATES_DIR}/${template}.html"
+  done
+  local tmp_home
+  tmp_home="$(mktemp)"
+  sed -e "s|__XMPP_DOMAIN__|${XMPP_DOMAIN}|g" "${ROOT_DIR}/web/index.html.template" > "${tmp_home}"
+  install -m 0644 -T "${tmp_home}" "${LANDING_DIR}/index.html"
+  rm -f "${tmp_home}"
+  install -m 0644 "${ROOT_DIR}/web/robots.txt" "${LANDING_DIR}/robots.txt"
+}
+
 CERT_DIR="/etc/letsencrypt/live/${LE_CERT_NAME}"
 CERT_FILE="${CERT_DIR}/fullchain.pem"
 KEY_FILE="${CERT_DIR}/privkey.pem"
@@ -294,6 +311,9 @@ install_admin_htpasswd
 echo "Staging coturn configuration and TURN secret..."
 install_turn_files
 
+echo "Installing versioned landing page and registration templates..."
+install_web_assets
+
 echo "Installing full nginx reverse proxy configuration..."
 render_template "${ROOT_DIR}/nginx/xmpp.conf.template" "${TMP_FINAL}"
 install_nginx_config "${TMP_FINAL}"
@@ -322,6 +342,8 @@ echo "certificate:       ${CERT_DIR}"
 echo "Prosody cert copy: ${CERT_SOURCE_DIR}"
 echo "TURN secret file:  ${TURN_SECRET_FILE}"
 echo "coturn config:      ${TURN_CONFIG_FILE}"
+echo "registration HTML: ${REGISTER_TEMPLATES_DIR}"
+echo "landing HTML:      ${LANDING_DIR}"
 echo "certbot hook:      ${HOOK_FILE}"
 echo
 echo "Next: deploy docker-compose.yml in Portainer or run:"

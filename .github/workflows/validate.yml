@@ -22,3 +22,14 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+
+      - name: Validate versioned web assets
+        run: |
+          for file in register success simplecaptcha hcaptcha recaptcha; do
+            test -s "register-templates/${file}.html"
+          done
+          test -s web/index.html.template
+          grep -Fq '{captcha}' register-templates/register.html
+          grep -Fq 'name="username"' register-templates/register.html
+          grep -Fq '{jid}' register-templates/success.html
+          grep -Fq '{challenge}' register-templates/simplecaptcha.html
