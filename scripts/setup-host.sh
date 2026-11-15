@@ -3,6 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+LEGACY_COMPOSE="${ROOT_DIR}/deploy/host-nginx/docker-compose.yml"
+if [[ "${COMPOSE_FILE:-}" != "${LEGACY_COMPOSE}" ]]; then
+  echo "Legacy Nginx script only. Set: export COMPOSE_FILE=${LEGACY_COMPOSE}" >&2
+  exit 1
+fi
 ENV_FILE="${1:-${ROOT_DIR}/.env}"
 
 if [[ ${EUID} -ne 0 ]]; then

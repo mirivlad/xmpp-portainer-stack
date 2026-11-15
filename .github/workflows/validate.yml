@@ -43,3 +43,8 @@ jobs:
           grep -Fq 'name="username"' register-templates/register.html
           grep -Fq '{jid}' register-templates/success.html
           grep -Fq '{challenge}' register-templates/simplecaptcha.html
+
+      - name: First-boot integration test (synthetic TLS)
+        run: |
+          bash -n tests/smoke_first_boot.sh
+          bash tests/smoke_first_boot.sh

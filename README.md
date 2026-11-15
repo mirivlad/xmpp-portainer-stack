@@ -108,7 +108,17 @@ TURN_RELAY_IP=192.168.1.20
 
 На сервере, где 80/443 уже заняты другим reverse proxy (как на нашем `tomas`), **не запускайте стандартный Compose параллельно** — будет конфликт портов.
 
-Ранее использовавшийся комплект сохранён в `deploy/host-nginx/docker-compose.yml`. Настройка через `scripts/setup-host.sh` остаётся *legacy-вариантом* для подготовленного хоста и не является требованием для новых standalone-установок. При переходе с прежнего Portainer stack нужно отдельно сверить volumes, сертификаты, пароли и параметры TURN. **Нельзя автоматически заменять существующий Compose**, иначе возникнет риск создания новой пустой базы рядом с рабочей.
+Ранее использовавшийся комплект сохранён в `deploy/host-nginx/docker-compose.yml`, а образец переменных — в `deploy/host-nginx/.env.example`. Старые `scripts/*.sh` обслуживают **только** этот вариант. Для них обязательно явно задать `COMPOSE_FILE`:
+
+```bash
+cp deploy/host-nginx/.env.example .env
+# заполнить домен, пути к сертификатам, TURN и пароли
+export COMPOSE_FILE="$PWD/deploy/host-nginx/docker-compose.yml"
+sudo --preserve-env=COMPOSE_FILE ./scripts/setup-host.sh
+docker compose up -d
+```
+
+Установка через `scripts/setup-host.sh` требует Nginx, Certbot и root-доступа на хосте; для нового самостоятельного стека она **не нужна**. При переходе с прежнего Portainer stack нужно отдельно сверить volumes, сертификаты, пароли и параметры TURN. **Нельзя автоматически заменять существующий Compose**, иначе возникнет риск создания новой пустой базы рядом с рабочей.
 
 ## 7. Обслуживание и ограничения
 
