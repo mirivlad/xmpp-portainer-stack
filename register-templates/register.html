@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="color-scheme" content="dark">
+<title>Регистрация — MIRV/XMPP</title>
+<style>
+:root{--bg:#070a0f;--panel:#101824;--line:rgba(137,196,255,.18);--text:#edf6ff;--muted:#91a4b8;--cyan:#72d7ff;--violet:#a38bff;--green:#6fffb0;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--text);background:var(--bg);line-height:1.5;color-scheme:dark}
+*{box-sizing:border-box}
+body{min-height:100vh;margin:0;overflow-x:hidden;background:radial-gradient(circle at 16% 0,rgba(53,107,255,.20),transparent 34%),radial-gradient(circle at 86% 14%,rgba(151,76,255,.15),transparent 28%),linear-gradient(#070a0f,#0a0f17 65%,#070a0f)}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(to bottom,black,transparent 82%)}
+a{color:#9cddff}
+.wrap{width:min(1120px,calc(100% - 36px));margin:auto;position:relative}
+.top{display:flex;justify-content:space-between;align-items:center;padding:24px 0}
+.brand{font:800 .92rem ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.18em;text-decoration:none;color:var(--text)}
+.brand b{color:var(--cyan)}
+.back{font-size:.92rem;color:#b8cbdd;text-decoration:none}
+.back:hover{color:white}
+.main{display:grid;grid-template-columns:.91fr 1.09fr;gap:clamp(24px,5vw,70px);align-items:center;padding:clamp(35px,7vh,75px) 0 75px}
+.eyebrow{display:flex;gap:12px;align-items:center;font:700 .8rem ui-monospace,Consolas,monospace;color:#a7bfd3;text-transform:uppercase;letter-spacing:.08em}
+.dot{width:8px;height:8px;flex:none;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px rgba(111,255,176,.08),0 0 18px var(--green)}
+.intro h1{font-size:clamp(2.9rem,6vw,5.35rem);line-height:.99;letter-spacing:-.055em;margin:25px 0}
+.intro h1 em{font-style:normal;background:linear-gradient(90deg,var(--cyan),#fff 45%,var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+.intro p{font-size:1.08rem;color:#b0bfd0;max-width:460px}
+.benefits{display:grid;gap:15px;margin-top:40px}
+.benefit{display:flex;gap:13px;align-items:flex-start;font-size:.94rem;color:#b8c9d9}
+.benefit span:first-child{width:32px;height:32px;flex:none;display:grid;place-items:center;border-radius:10px;background:rgba(97,164,232,.09);border:1px solid var(--line);color:var(--cyan);font-weight:800}
+.form-card{position:relative;padding:clamp(24px,4vw,38px);border:1px solid rgba(137,196,255,.22);border-radius:23px;background:linear-gradient(145deg,rgba(19,29,44,.94),rgba(10,16,26,.92));box-shadow:0 25px 85px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.04);overflow:hidden}
+.form-card:before{content:"";position:absolute;inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,var(--cyan),var(--violet),transparent);opacity:.6}
+.kicker{font:700 .77rem ui-monospace,Consolas,monospace;color:var(--cyan);letter-spacing:.12em;text-transform:uppercase}
+.form-card h2{font-size:1.8rem;letter-spacing:-.035em;margin:8px 0 5px}
+.sub{margin:0 0 28px;color:var(--muted);font-size:.92rem}
+label,.captcha th{display:block;font-weight:700;font-size:.88rem;color:#d9e9f7;margin:0 0 9px;text-align:left}
+.field{margin-bottom:20px}
+input:not([type=hidden]){width:100%;height:48px;border-radius:11px;background:#09111c;border:1px solid rgba(128,167,205,.28);padding:0 14px;font:inherit;color:var(--text);outline:none;transition:border-color .2s,box-shadow .2s}
+input:not([type=hidden]):focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(114,215,255,.11)}
+input::placeholder{color:#63798c}
+.jid-field{display:flex;align-items:center;background:#09111c;border:1px solid rgba(128,167,205,.28);border-radius:11px;overflow:hidden}
+.jid-field:focus-within{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(114,215,255,.11)}
+.jid-field input:not([type=hidden]){border:none;background:transparent;box-shadow:none;min-width:0;flex:1;width:1px}
+.jid-field .suffix{padding:0 13px;color:#83cdef;font:600 .86rem ui-monospace,Consolas,monospace;white-space:nowrap;border-left:1px solid var(--line)}
+.hint{font-size:.79rem;color:var(--muted);margin-top:7px}
+.pass-row{position:relative}
+.pass-row input{padding-right:92px}
+.reveal{position:absolute;right:7px;top:7px;height:34px;padding:0 9px;background:#1b2a3c;border:1px solid var(--line);border-radius:8px;color:#c2d9ee;cursor:pointer;font:600 .78rem inherit}
+.reveal:hover{background:#253951}
+.captcha-box{border-top:1px solid rgba(255,255,255,.08);padding-top:21px;margin-top:5px}
+.captcha-box h3{font-size:.87rem;margin:0 0 11px;color:#bcd7e9}
+.captcha{border-collapse:collapse;width:100%}
+.captcha tr{display:block}
+.captcha th{padding:0 0 8px;font-weight:600}
+.captcha td{display:block;padding:0}
+.captcha input:not([type=hidden]){max-width:100%}
+.captcha .g-recaptcha,.captcha .h-captcha{max-width:100%;overflow:auto}
+.feedback{border:1px solid rgba(255,135,135,.4);border-radius:11px;background:rgba(160,53,62,.12);color:#ffc3ca;padding:12px 14px;font-size:.9rem;margin:0 0 20px}
+.feedback:empty{display:none}
+.submit{display:block;margin-top:24px;width:100%;min-height:50px;border:0;border-radius:11px;background:linear-gradient(135deg,#7addff,#8ca5ff);color:#071019;font:800 .98rem inherit;cursor:pointer;box-shadow:0 12px 35px rgba(85,170,255,.15);transition:transform .2s,filter .2s}
+.submit:hover{transform:translateY(-2px);filter:brightness(1.07)}
+.submit:focus-visible,.reveal:focus-visible,a:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+.fine{font-size:.81rem;color:#879bb0;margin:17px 0 0;text-align:center}
+.foot{border-top:1px solid rgba(255,255,255,.06);padding:28px 0 36px;color:#607386;font:700 .78rem ui-monospace,Consolas,monospace;letter-spacing:.05em}
+@media(max-width:850px){.main{grid-template-columns:1fr;gap:28px;padding-top:25px}.intro h1{font-size:clamp(2.8rem,8vw,4.4rem)}.intro p{max-width:680px}.benefits{grid-template-columns:repeat(3,1fr);gap:11px;margin-top:22px}.benefit{font-size:.8rem;align-items:flex-start}}
+@media(max-width:580px){.wrap{width:min(100% - 28px,1120px)}.main{padding-top:18px;padding-bottom:38px}.intro h1{font-size:clamp(2.7rem,12vw,3.8rem);margin:18px 0}.intro p{font-size:.95rem}.benefits{grid-template-columns:1fr;gap:9px}.benefit span:first-child{width:27px;height:27px}.form-card{border-radius:18px;padding:23px 18px}.jid-field .suffix{font-size:.72rem;padding:0 9px}.top{padding:20px 0}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top"><a href="/" class="brand"><b>MIRV</b>/XMPP</a><a class="back" href="/">← На главную</a></header>
+<main class="main">
+<section class="intro">
+<div class="eyebrow"><span class="dot" aria-hidden="true"></span> independent node · online</div>
+<h1>Твоя связь.<br><em>Твои правила.</em></h1>
+<p>Создай аккаунт на независимом XMPP-сервере. Общайся с людьми на других серверах, выбирай любимый клиент и не привязывайся к одной платформе.</p>
+<div class="benefits">
+<div class="benefit"><span>01</span>Без номера телефона и сторонних аккаунтов</div>
+<div class="benefit"><span>02</span>Совместимость с современными XMPP-клиентами</div>
+<div class="benefit"><span>03</span>OMEMO-шифрование в поддерживаемых клиентах</div>
+</div>
+</section>
+<section class="form-card" aria-labelledby="form-title">
+<div class="kicker">Регистрация · XMPP</div>
+<h2 id="form-title">Новый аккаунт</h2>
+<p class="sub">Пара минут — и ты в сети.</p>
+<p class="feedback" role="alert" id="notice">{notice}</p>
+<form action="{path}" method="POST" accept-charset="UTF-8">
+<div class="field"><label for="username">Имя пользователя</label><div class="jid-field"><input id="username" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="например, ivan" maxlength="128"><span class="suffix">@{hostname}</span></div><div class="hint">Это будет твой постоянный адрес в XMPP.</div></div>
+<div class="field"><label for="password">Пароль</label><div class="pass-row"><input id="password" name="password" required type="password" autocomplete="new-password" placeholder="Придумай надёжный пароль"><button class="reveal" type="button" data-target="password" aria-label="Показать пароль">Показать</button></div></div>
+<div class="field"><label for="confirm_password">Повтори пароль</label><div class="pass-row"><input id="confirm_password" name="confirm_password" required type="password" autocomplete="new-password" placeholder="Ещё раз тот же пароль"><button class="reveal" type="button" data-target="confirm_password" aria-label="Показать пароль">Показать</button></div></div>
+<div class="captcha-box"><h3>Проверка перед регистрацией</h3><table class="captcha"><tbody>{captcha}</tbody></table></div>
+<button class="submit" type="submit">Создать аккаунт →</button>
+<p class="fine">Пароль восстановить через почту пока нельзя — обязательно сохрани его.</p>
+</form>
+</section>
+</main>
+<footer class="foot">MIRV/XMPP · Независимый узел связи · Powered by Prosody</footer>
+</div>
+<script>
+document.querySelectorAll(".reveal").forEach(function(button){
+  button.addEventListener("click",function(){
+    var input=document.getElementById(button.getAttribute("data-target"));
+    var visible=input.type==="password";
+    input.type=visible?"text":"password";
+    button.textContent=visible?"Скрыть":"Показать";
+    button.setAttribute("aria-label",visible?"Скрыть пароль":"Показать пароль");
+  });
+});
+var notice=document.getElementById("notice");
+if(notice){var messages={
+  "Captcha verification failed":"Проверка не пройдена. Реши новый пример и попробуй ещё раз.",
+  "Passwords don't match":"Пароли не совпадают.",
+  "Username already taken":"Это имя пользователя уже занято.",
+  "Registration not allowed":"Регистрация сейчас ограничена.",
+  "Username contains forbidden characters":"В имени пользователя есть недопустимые символы.",
+  "The username field was empty":"Укажи имя пользователя."
+};var translation=messages[notice.textContent.trim()];if(translation)notice.textContent=translation;}
+</script>
+</body>
+</html>
