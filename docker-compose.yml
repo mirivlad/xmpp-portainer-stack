@@ -145,12 +145,22 @@ services:
         export TURN_SECRET="$$(cat /run/xmpp-secrets/turn-secret)"
         export DOMAIN="$$XMPP_DOMAIN" LOCAL="$$XMPP_ADMIN_USER" PASSWORD="$$XMPP_ADMIN_PASSWORD"
         mkdir -p /var/lib/prosody/custom_plugins /etc/prosody/certs
+        # prosodyctl install runs LuaRocks as user prosody. A fresh Docker volume
+        # is root-owned and must be handed over before installing the modules.
+        chown -R prosody:prosody /var/lib/prosody /etc/prosody/certs
 
         install_module() {
           local mod="$$1" ver="$$2" url="$$3"
           local marker="/var/lib/prosody/custom_plugins/.xmpp-stack-$${mod}-$${ver}"
-          if [[ ! -f "$$marker" ]]; then
+          local installed="/var/lib/prosody/custom_plugins/share/lua/5.4/$$mod.lua"
+          # An old marker alone is NOT evidence of a successful installation.
+          if [[ ! -r "$$installed" ]]; then
+            rm -f "$$marker"
             prosodyctl install "$$url"
+            if [[ ! -r "$$installed" ]]; then
+              echo "Failed to install $$mod: $$installed missing" >&2
+              exit 1
+            fi
             touch "$$marker"
           fi
         }
