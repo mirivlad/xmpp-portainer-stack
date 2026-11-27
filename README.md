@@ -1,5 +1,7 @@
 # XMPP Portainer Stack
 
+[![Угостить разработчика кофе / Buy me a coffee](https://img.shields.io/badge/Support-Buy%20me%20a%20coffee-7055a5?style=flat-square&logo=buymeacoffee&logoColor=white)](https://mirv.top/support/)
+
 Готовый самостоятельный XMPP-сервер на **Prosody 13 + PostgreSQL + Caddy + coturn**. Устанавливается как Docker Compose или Git stack в Portainer. Основной вариант не требует отдельно установленного Nginx, Certbot, ручного копирования сертификатов или файлов на Docker-хост.
 
 - XMPP для клиентов и серверов (5222/5269);
@@ -139,4 +141,4 @@ docker compose up -d
 
 Если проект оказался полезен, вы можете добровольно поддержать его развитие. / If this project is useful to you, you can voluntarily support its development.
 
-[![Угостить разработчика кофе / Buy me a coffee](https://img.shields.io/badge/Support-Buy%20me%20a%20coffee-7055a5?style=flat-square&logo=buymeacoffee&logoColor=white)](https://mirv.top/support/)
+[Страница поддержки / Support page](https://mirv.top/support/)
